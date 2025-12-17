@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Atlas</title>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #f0f0f0; }
+        model-viewer { width: 100vw; height: 100vh; }
+        /* HATA GÖSTERME KUTUSU */
+        #debug-console {
+            position: absolute; top: 0; left: 0; width: 100%; height: 150px;
+            background: rgba(0, 0, 0, 0.85); color: #00ff00;
+            font-family: monospace; font-size: 14px; padding: 10px;
+            overflow-y: auto; z-index: 9999; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="debug-console">Sistem Başlatılıyor...<br></div>
+
+    <model-viewer 
+        id="viewer" 
+        src="" 
+        camera-controls 
+        auto-rotate
+        shadow-intensity="1">
+    </model-viewer>
+
+    <script>
+        // --- LOGLAMA FONKSİYONU ---
+        function log(msg) {
+            const consoleBox = document.getElementById('debug-console');
+            consoleBox.innerHTML += "> " + msg + "<br>";
+            consoleBox.scrollTop = consoleBox.scrollHeight; // En alta kaydır
+        }
+
+        // Genel Hataları Yakala
+        window.onerror = function(message, source, lineno, colno, error) {
+            log("HATA: " + message);
+        };
+
+        log("Sayfa Yüklendi. Model bekleniyor...");
+
+        // --- PYTHON KOMUTLARINI DİNLE ---
+        window.changeModel = (modelPath) => {
+            log("Komut Geldi: " + modelPath);
+            
+            const viewer = document.querySelector("#viewer");
+            if (!viewer) {
+                log("HATA: <model-viewer> etiketi bulunamadı!");
+                return;
+            }
+
+            // Modeli değiştir
+            viewer.src = modelPath;
+            log("Model kaynağı değiştirildi: " + modelPath);
+            
+            // Dosya yükleme hatası olursa yakala
+            viewer.addEventListener('error', (e) => {
+                log("YÜKLEME HATASI: Model dosyası bulunamadı veya bozuk! (" + modelPath + ")");
+            });
+            
+            viewer.addEventListener('load', () => {
+                log("BAŞARILI: Model yüklendi ve görüntüleniyor.");
+            });
+        };
+    </script>
+</body>
+</html>
