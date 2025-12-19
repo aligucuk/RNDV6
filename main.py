@@ -1,103 +1,102 @@
 import flet as ft
 from database.db_manager import DatabaseManager
-from utils.locales import TR
-# Sayfalar
+
+# SAYFA IMPORTLARI
 from pages.login import LoginPage
-from pages.dashboard import DashboardPage
-from pages.patients import PatientsPage
-from pages.patient_list import PatientListPage
-from pages.appointments import AppointmentsPage
-from pages.all_appointments import AllAppointmentsPage
-from pages.finance import FinancePage
-from pages.calendar import CalendarPage
-from pages.settings import SettingsPage
-from pages.inventory import InventoryPage
-from pages.stats import StatsPage
-from pages.medical_detail import MedicalDetailPage
-from pages.waiting_room import WaitingRoomPage
 from pages.doctor_home import DoctorHomePage
-from utils.license_manager import LicenseManager
-from pages.activation import ActivationPage
+from pages.patients import PatientsPage       
+from pages.appointments import AppointmentsPage
+from pages.medical_detail import MedicalDetailPage
+from pages.finance import FinancePage
+from pages.inventory import InventoryPage
+from pages.settings import SettingsPage
+from pages.chat_page import ChatPage
+from pages.calendar_page import CalendarPage
+from pages.tv_display import TVDisplayPage
+from utils.notification_service import NotificationService
 
 def main(page: ft.Page):
+    page.title = "RNDV6 Klinik Yönetim Sistemi"
     
-    page.window_prevent_close = True  
-
-    def window_event(e):
-        if e.data == "close":
-            
-           page.window_destroy()
-    page.on_window_event = window_event
-    page.title = "RNDV4 Doktor Paneli"
-    page.theme_mode = ft.ThemeMode.LIGHT
-    page.window_width = 1200
-    page.window_height = 800
-    
-    # ... Veritabanını Başlat ...
     db = DatabaseManager()
     
-    # --- LİSANS KONTROLÜ (YENİ) ---
-    lm = LicenseManager(db)
-    is_licensed, license_msg = lm.check_license()
+    # --- BİLDİRİM SERVİSİNİ BAŞLAT ---
+    notif_service = NotificationService(db)
+    notif_service.start()
+
+    # --- TEMA YÜKLEME (GLOBAL ETKİ) ---
+    def load_theme():
+        saved_theme = db.get_setting("theme_mode")
+        saved_color = db.get_setting("theme_color") or "teal"
+        
+        page.theme_mode = ft.ThemeMode.DARK if saved_theme == "dark" else ft.ThemeMode.LIGHT
+        page.theme = ft.Theme(color_scheme_seed=saved_color)
+        page.update()
+
+    # Başlarken yükle
+    load_theme()
+
+    # --- GLOBAL CHAT OVERLAY ---
+    # Bu Stack tüm sayfaların üstünde duracak
+    chat_window = ft.Container(
+        content=ft.Column([
+            ft.Container(
+                content=ft.Row([ft.Text("Sohbet", color="white"), ft.IconButton(ft.Icons.CLOSE, icon_color="white", icon_size=15, on_click=lambda e: toggle_chat(False))]), 
+                bgcolor="teal", padding=5
+            ),
+            ft.Container(content=ft.Text("Sohbet yükleniyor..."), expand=True, bgcolor="white") # Buraya ChatPage içeriği (küçültülmüş) gelebilir
+        ]),
+        width=300, height=400, bgcolor="white", border_radius=10,
+        shadow=ft.BoxShadow(blur_radius=20, color="black"),
+        bottom=10, right=20, visible=False # Başlangıçta gizli
+    )
     
-    # Başlangıç Rotasını Belirle
-    initial_route = "/login" if is_licensed else "/activation"
+    page.overlay.append(chat_window) # Sayfanın en üst katmanına ekle
+
+    def toggle_chat(show):
+        chat_window.visible = show
+        chat_window.update()
+
+    # Chat butonuna basınca sayfaya gitmek yerine popup açsın:
+    # DoctorHome ve diğer sayfalardaki chat butonu aksiyonunu değiştirmelisiniz.
+    # Ancak Flet'te sayfalar arası fonksiyon çağırmak için 'pubsub' kullanmak en temizidir.
     
-    def route_change(e):
-        # Rota Kontrolü (Router)
+    def on_broadcast_message(msg):
+        if msg == "OPEN_CHAT_POPUP":
+            toggle_chat(True)
+    
+    page.pubsub.subscribe(on_broadcast_message)
+
+    def route_change(route):
+        # Her sayfa değişiminde temayı zorla (Sayfalar arası geçişte renk kaybı olmasın)
+        load_theme()
+        
+        page.views.clear()
         troute = ft.TemplateRoute(page.route)
 
-        # 1. Login
-        if troute.match("/login"):
+        if page.route == "/" or troute.match("/login"):
             page.views.append(LoginPage(page, db).view())
-        
-        # 2. Dashboard
-        elif troute.match("/dashboard"):
-            page.views.append(DashboardPage(page, db).view())
-
-        # 3. Hastalar
-        elif troute.match("/patient_list"):
-            page.views.append(PatientListPage(page, db).view())
-        elif troute.match("/patients/:id"):
-            page.views.append(PatientsPage(page, db, int(troute.id)).view())
-        elif troute.match("/patients"):
-            page.views.append(PatientsPage(page, db).view())
-
-        # 4. Randevular
-        elif troute.match("/appointments"):
-            page.views.append(AppointmentsPage(page, db).view())
-        elif troute.match("/all_appointments"):
-            page.views.append(AllAppointmentsPage(page, db).view())
-            
-        # 5. Diğer Modüller
-        elif troute.match("/finance"):
-            page.views.append(FinancePage(page, db).view())
-        elif troute.match("/calendar"):
-            page.views.append(CalendarPage(page, db).view())
-        elif troute.match("/settings"):
-            page.views.append(SettingsPage(page, db).view())
-        elif troute.match("/inventory"):
-            page.views.append(InventoryPage(page, db).view())
-        elif troute.match("/stats"):
-            page.views.append(StatsPage(page, db).view())
-        # ... 
-        elif troute.match("/activation"):
-            page.views.append(ActivationPage(page, db).view())
-        # ...
-        # 6. Medikal Detay (3D Atlaslı)
-        elif troute.match("/medical/:id"):
-            page.views.append(MedicalDetailPage(page, db).view())
-
-        # 7. YENİ: DOKTOR & TV EKRANLARI
         elif troute.match("/doctor_home"):
             page.views.append(DoctorHomePage(page, db).view())
-        elif troute.match("/waiting_room"):
-            page.views.append(WaitingRoomPage(page, db).view())
-            
-        # Varsayılan: Login
-        else:
-            page.go(initial_route)
-            
+        elif troute.match("/patient_list"):
+            page.views.append(PatientsPage(page, db).view())
+        elif troute.match("/appointments"):
+            page.views.append(AppointmentsPage(page, db).view())
+        elif troute.match("/medical/:id"):
+            page.views.append(MedicalDetailPage(page, db).view())
+        elif troute.match("/finance"):
+            page.views.append(FinancePage(page, db).view())
+        elif troute.match("/inventory"):
+            page.views.append(InventoryPage(page, db).view())
+        elif troute.match("/settings"):
+            page.views.append(SettingsPage(page, db).view())
+        elif troute.match("/chat"):
+            page.views.append(ChatPage(page, db).view())
+        elif troute.match("/calendar"):
+            page.views.append(CalendarPage(page, db).view())
+        elif troute.match("/tv"):
+            page.views.append(TVDisplayPage(page, db).view())
+
         page.update()
 
     def view_pop(view):
@@ -108,7 +107,7 @@ def main(page: ft.Page):
     page.on_route_change = route_change
     page.on_view_pop = view_pop
     
-    # Başlangıç Rotası
-    page.go(initial_route)
+    page.go("/")
 
-ft.app(target=main, assets_dir="assets")
+if __name__ == "__main__":
+    ft.app(target=main)

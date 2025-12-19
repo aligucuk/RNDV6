@@ -1,91 +1,136 @@
-from fpdf import FPDF
-import datetime
 import os
+import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib import colors
 
-class PDFReport(FPDF):
-    def header(self):
-        # Logo (Eğer assets klasöründe logo.png varsa kullanır, yoksa hata vermez)
+class PDFManager:
+    def __init__(self, filename):
+        self.filename = filename
+        self.c = canvas.Canvas(filename, pagesize=A4)
+        self.width, self.height = A4
+        self._register_fonts()
+
+    def _register_fonts(self):
+        """Türkçe karakter destekleyen fontları kaydeder."""
+        # Windows/Linux sistem fontlarını dener, yoksa standart font kullanır
+        try:
+            # Genellikle Windows'ta bulunan Arial fontu
+            if os.name == 'nt':
+                pdfmetrics.registerFont(TTFont('Arial', 'arial.ttf'))
+                pdfmetrics.registerFont(TTFont('Arial-Bold', 'arialbd.ttf'))
+                self.font_reg = 'Arial'
+                self.font_bold = 'Arial-Bold'
+            else:
+                # Linux/Mac için alternatif (Sistemde yüklü olmalı veya assets'e eklenmeli)
+                # Şimdilik standart Helvetica kullanıyoruz (TR karakter sorunu olabilir)
+                # Doğrusu: assets klasörüne bir .ttf dosyası koyup onu yüklemektir.
+                self.font_reg = 'Helvetica'
+                self.font_bold = 'Helvetica-Bold'
+        except:
+            self.font_reg = 'Helvetica'
+            self.font_bold = 'Helvetica-Bold'
+
+    def create_header(self):
+        # Logo
         if os.path.exists("assets/logo.png"):
-            self.image("assets/logo.png", 10, 8, 33)
-        
-        self.set_font('Arial', 'B', 15)
-        # Türkçe karakter sorunu olmaması için encode/latin-1 hilesi veya font yükleme gerekir.
-        # FPDF'in standart fontları Türkçe karakter (ş,ğ,İ) desteklemez.
-        # Bu yüzden basit ASCII karakterler veya Windows fontu yüklemek gerekir.
-        # Profesyonel çözüm için 'DejaVuSans.ttf' indirip add_font yapmak gerekir.
-        # Şimdilik "tr_chars" fonksiyonu ile harfleri dönüştüreceğiz.
-        
-        self.cell(80) # Sağa kaydır
-        self.cell(30, 10, 'RNDV4 KLINIK SISTEMI', 0, 0, 'C')
-        self.ln(20)
+            self.c.drawImage("assets/logo.png", 10*mm, 270*mm, width=30*mm, preserveAspectRatio=True, mask='auto')
 
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Sayfa {self.page_no()}', 0, 0, 'C')
+        # Başlıklar
+        self.c.setFont(self.font_bold, 18)
+        self.c.drawRightString(200*mm, 280*mm, "RNDV5 KLİNİK SİSTEMİ")
+        
+        self.c.setFont(self.font_reg, 10)
+        self.c.drawRightString(200*mm, 275*mm, f"Tarih: {datetime.date.today().strftime('%d.%m.%Y')}")
+        
+        # Çizgi
+        self.c.setStrokeColor(colors.teal)
+        self.c.setLineWidth(1)
+        self.c.line(10*mm, 265*mm, 200*mm, 265*mm)
 
-def tr_chars(text):
-    """Türkçe karakterleri FPDF'in anlayacağı formata çevirir"""
-    # Basit FPDF sürümlerinde Türkçe karakter sorunu vardır.
-    # Bu basit değişim harfleri okunur hale getirir.
-    replacements = {
-        "ğ": "g", "Ğ": "G", "ş": "s", "Ş": "S", "ı": "i", "İ": "I",
-        "ü": "u", "Ü": "U", "ö": "o", "Ö": "O", "ç": "c", "Ç": "C"
-    }
-    for search, replace in replacements.items():
-        text = text.replace(search, replace)
-    return text
+    def create_patient_info(self, doctor_name, patient_name):
+        self.c.setStrokeColor(colors.black)
+        y = 250*mm
+        
+        self.c.setFont(self.font_bold, 12)
+        self.c.drawString(15*mm, y, "DOKTOR:")
+        self.c.setFont(self.font_reg, 12)
+        self.c.drawString(45*mm, y, f"Dr. {doctor_name}")
+        
+        y -= 10*mm
+        self.c.setFont(self.font_bold, 12)
+        self.c.drawString(15*mm, y, "HASTA:")
+        self.c.setFont(self.font_reg, 12)
+        self.c.drawString(45*mm, y, patient_name)
+
+    def create_body(self, diagnosis, prescription):
+        # Tanı Alanı
+        y = 220*mm
+        self.c.setFillColor(colors.teal)
+        self.c.rect(10*mm, y, 190*mm, 8*mm, fill=1, stroke=0)
+        self.c.setFillColor(colors.white)
+        self.c.setFont(self.font_bold, 12)
+        self.c.drawString(15*mm, y+2*mm, "TANI (TEŞHİS)")
+        
+        self.c.setFillColor(colors.black)
+        self.c.setFont(self.font_reg, 11)
+        
+        # Metni sarmalamak (Text Wrapping) için basit çözüm
+        text_object = self.c.beginText(15*mm, y-6*mm)
+        text_object.setFont(self.font_reg, 11)
+        text_object.textLines(diagnosis)
+        self.c.drawText(text_object)
+        
+        # Reçete Alanı
+        y = 180*mm
+        self.c.setFillColor(colors.teal)
+        self.c.rect(10*mm, y, 190*mm, 8*mm, fill=1, stroke=0)
+        self.c.setFillColor(colors.white)
+        self.c.setFont(self.font_bold, 12)
+        self.c.drawString(15*mm, y+2*mm, "REÇETE / TEDAVİ PLANI")
+        
+        self.c.setFillColor(colors.black)
+        self.c.setFont(self.font_reg, 11)
+        
+        text_object = self.c.beginText(15*mm, y-6*mm)
+        text_object.textLines(prescription)
+        self.c.drawText(text_object)
+
+    def create_footer(self):
+        # İmza Alanı
+        self.c.setDash(3, 3) # Kesik çizgi
+        self.c.line(130*mm, 40*mm, 190*mm, 40*mm)
+        self.c.setFont(self.font_reg, 10)
+        self.c.drawCentredString(160*mm, 35*mm, "Kaşe / İmza")
+        
+        # Karekod (Placeholder)
+        self.c.setDash(1, 0) # Düz çizgiye dön
+        self.c.rect(10*mm, 10*mm, 25*mm, 25*mm)
+        self.c.setFont(self.font_reg, 8)
+        self.c.drawCentredString(22.5*mm, 20*mm, "e-Reçete QR")
+
+    def save(self):
+        self.c.save()
+        return self.filename
 
 def create_prescription_pdf(doctor_name, patient_name, diagnosis, prescription):
-    pdf = PDFReport()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    
-    # Tarih
-    date_str = datetime.date.today().strftime("%d.%m.%Y")
-    pdf.cell(0, 10, f"Tarih: {date_str}", 0, 1, 'R')
-    
-    # Başlık
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "RECETE / MUAYENE RAPORU", 0, 1, 'C')
-    pdf.ln(10)
-    
-    # Hasta ve Doktor Bilgisi
-    pdf.set_font("Arial", size=12)
-    pdf.cell(0, 10, tr_chars(f"Sayin Dr. {doctor_name}"), 0, 1)
-    pdf.cell(0, 10, tr_chars(f"Hasta: {patient_name}"), 0, 1)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) # Çizgi çek
-    pdf.ln(10)
-    
-    # Tanı
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, tr_chars("TANI (TESHIS):"), 0, 1)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 10, tr_chars(diagnosis))
-    pdf.ln(5)
-    
-    # Reçete / Tedavi
-    pdf.set_font("Arial", 'B', 12)
-    pdf.cell(0, 10, tr_chars("RECETE / TEDAVI:"), 0, 1)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 10, tr_chars(prescription))
-    
-    # İmza Bloğu
-    pdf.set_y(-50)
-    pdf.set_font("Arial", 'I', 10)
-    pdf.cell(0, 10, "Kase / Imza", 0, 1, 'R')
-    
-    # Dosyayı Kaydet
+    """Eski fonksiyon ile uyumlu sarmalayıcı (wrapper)"""
     filename = f"recete_{datetime.datetime.now().strftime('%H%M%S')}.pdf"
-    pdf.output(filename)
     
-    # Dosyayı Otomatik Aç (Windows/Mac)
+    pdf = PDFManager(filename)
+    pdf.create_header()
+    pdf.create_patient_info(doctor_name, patient_name)
+    pdf.create_body(diagnosis, prescription)
+    pdf.create_footer()
+    pdf.save()
+    
+    # Dosyayı Otomatik Aç
     try:
-        if os.name == 'nt': # Windows
-            os.startfile(filename)
-        else: # Mac/Linux
-            os.system(f"open {filename}")
-    except:
-        pass
-        
+        if os.name == 'nt': os.startfile(filename)
+        else: os.system(f"open {filename}")
+    except: pass
+    
     return filename

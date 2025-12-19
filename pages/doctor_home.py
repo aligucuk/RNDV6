@@ -1,96 +1,80 @@
 import flet as ft
-import datetime
+from datetime import datetime
+import json
 
 class DoctorHomePage:
     def __init__(self, page: ft.Page, db):
         self.page = page
         self.db = db
-        self.doctor_id = page.session.get("user_id")
-        self.doctor_name = page.session.get("user_name")
+        self.user_role = page.session.get("user_role")
+        self.user_id = page.session.get("user_id")
+        self.user_name = page.session.get("user_name")
+
+        # BUG FIX: Tema her girişte yenilenmeli
+        self.theme_color = self.db.get_setting("theme_color") or "teal"
+        self.is_dark = (self.db.get_setting("theme_mode") == "dark")
+        
+        self.bg_color = "#1f2630" if self.is_dark else "#f5f7f8"
+        self.text_color = "white" if self.is_dark else "#37474f"
 
     def view(self):
-        # --- BUGÜNKÜ RANDEVULAR ---
-        today = datetime.date.today().strftime('%Y-%m-%d')
-        
-        # Sadece bu doktora ait bugünkü randevuları çeken özel bir sorgu lazım
-        # db_manager'da genel fonksiyon var, onu filtreleyebiliriz veya yeni yazabiliriz.
-        # Basitlik için genel 'get_todays_appointments' kullanıp filtreliyoruz.
-        all_appts = self.db.get_todays_appointments()
-        
-        # Filtreleme (Sadece benim hastalarım) - Gerçek projede SQL ile yapılmalı
-        my_appts = [] 
-        # get_todays_appointments() şunu döner: (id, p_name, date, status, p_id)
-        # Ancak içinde doctor_id yok. Bunu düzeltmemiz lazım.
-        # Şimdilik listedeki herkesi gösterelim (Demo için), 
-        # ya da db_manager'ı güncellememiz gerekir.
-        # Hadi db_manager'a dokunmadan, listede görünen herkesi çağırma yetkisi verelim.
-        
-        lv_patients = ft.ListView(expand=True, spacing=10)
+        # 1. Header
+        header = ft.Container(
+            content=ft.Row([
+                ft.Column([
+                    ft.Text(f"Merhaba, {self.user_name}", size=24, weight="bold", color="white"), 
+                    ft.Text(f"Yetki: {self.user_role.capitalize()}", color="white70")
+                ]),
+                ft.IconButton("logout", icon_color="white", on_click=lambda _: self.page.go("/"))
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=30, bgcolor=self.theme_color, border_radius=ft.border_radius.only(bottom_left=30, bottom_right=30)
+        )
 
-        for appt in all_appts:
-            aid, p_name, dt, status, pid = appt
+        # 2. Menü Yetkilendirme (RBAC)
+        # Hangi kartın kime görüneceği
+        cards_config = [
+            # Herkes Görür
+            {"id": "card_pat", "t": "Hastalar", "i": ft.Icons.PEOPLE, "c": "blue", "r": "/patient_list", "roles": ["admin", "doktor", "sekreter"]},
+            {"id": "card_app", "t": "Randevular", "i": ft.Icons.CALENDAR_TODAY, "c": "teal", "r": "/appointments", "roles": ["admin", "doktor", "sekreter"]},
+            {"id": "card_cal", "t": "Ajanda", "i": ft.Icons.CALENDAR_MONTH, "c": "purple", "r": "/calendar", "roles": ["admin", "doktor", "sekreter"]},
             
-            # Zamanı al
-            time_str = dt.strftime("%H:%M")
-            
-            # Renkler
-            status_color = "orange"
-            if status == "Tamamlandı": status_color = "blue"
-            elif status == "İptal": status_color = "red"
-            elif status == "Muayenede": status_color = "green"
+            # Sadece Doktor ve Admin (Asistan Göremez)
+            {"id": "card_fin", "t": "Finans", "i": ft.Icons.ATTACH_MONEY, "c": "green", "r": "/finance", "roles": ["admin", "doktor"]}, # İsteğe göre doktor da gizlenebilir
+            {"id": "card_crm", "t": "CRM", "i": ft.Icons.PIE_CHART, "c": "red", "r": "/crm", "roles": ["admin", "sekreter"]}, # Doktor göremez demiştiniz
+            {"id": "card_stk", "t": "Stok", "i": ft.Icons.INVENTORY, "c": "orange", "r": "/inventory", "roles": ["admin", "sekreter"]}, # Doktor göremez
 
-            # İŞLEM BUTONLARI
-            btn_call = ft.IconButton(
-                icon="campaign", icon_color="green", tooltip="İçeri Çağır (TV)",
-                on_click=lambda e, x=aid: self.call_patient(x)
-            )
-            btn_medical = ft.ElevatedButton(
-                "Muayene Et", icon="medical_services", 
-                on_click=lambda e, x=pid: self.page.go(f"/medical/{x}")
-            )
+            # Sohbet & Ayarlar (Herkes)
+            {"id": "card_chat", "t": "Sohbet", "i": ft.Icons.CHAT, "c": "pink", "r": "/chat", "roles": ["admin", "doktor", "sekreter"]},
+            {"id": "card_set", "t": "Ayarlar", "i": ft.Icons.SETTINGS, "c": "grey", "r": "/settings", "roles": ["admin", "doktor", "sekreter"]},
+        ]
 
-            card = ft.Card(
-                content=ft.Container(
-                    content=ft.Row([
-                        ft.Text(time_str, size=20, weight="bold", color="teal"),
-                        ft.Column([
-                            ft.Text(p_name, weight="bold", size=16),
-                            ft.Container(content=ft.Text(status, color="white", size=10), bgcolor=status_color, padding=5, border_radius=5)
-                        ], expand=True),
-                        btn_call,
-                        btn_medical
-                    ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                    padding=15
-                )
-            )
-            lv_patients.controls.append(card)
+        # Doktor Yetkileri (İstek: Gelir/Gider, Stok, CRM, Ayarlar'daki User Kalksın)
+        # Yukarıdaki listede rolleri filtreleyelim:
+        
+        my_widgets = []
+        for c in cards_config:
+            if self.user_role in c["roles"]:
+                # Doktor Kısıtlaması (CRM, STOK yok)
+                if self.user_role == "doktor" and c["id"] in ["card_crm", "card_stk"]:
+                    continue
+                
+                my_widgets.append(self.create_card(c))
 
-        if not lv_patients.controls:
-            lv_patients.controls.append(ft.Text("Bugün için kayıtlı randevu yok.", color="grey", text_align="center"))
+        menu_area = ft.Row(my_widgets, wrap=True, spacing=20, alignment=ft.MainAxisAlignment.CENTER)
 
         return ft.View(
             "/doctor_home",
-            [
-                ft.AppBar(title=ft.Text(f"Dr. {self.doctor_name} - Panel"), bgcolor="teal", 
-                          actions=[ft.IconButton("logout", on_click=lambda _: self.page.go("/login"))]),
-                ft.Container(
-                    content=ft.Column([
-                        ft.Text(f"Bugünkü Randevular ({today})", size=20, weight="bold"),
-                        ft.Divider(),
-                        lv_patients
-                    ]),
-                    padding=20, expand=True
-                )
-            ],
-            bgcolor="background"
+            [ft.Column([header, ft.Container(height=20), menu_area], scroll=ft.ScrollMode.AUTO)],
+            bgcolor=self.bg_color, padding=0
         )
 
-    def call_patient(self, appt_id):
-        # 1. Önce "Muayenede" olan herkesi "Bekliyor" veya "Tamamlandı" yapmalıyız ki TV karışmasın
-        # (Basitlik için yapmıyoruz, son basılan geçerli olur)
-        
-        # 2. Bu hastayı "Muayenede" yap
-        self.db.set_appointment_status(appt_id, "Muayenede")
-        
-        self.page.open(ft.SnackBar(ft.Text("Hasta Çağrıldı! TV Ekranına Bakınız."), bgcolor="green"))
-        self.page.go("/doctor_home") # Yenile
+    def create_card(self, data):
+        return ft.Container(
+            content=ft.Column([
+                ft.Icon(data["i"], size=40, color="white"),
+                ft.Text(data["t"], weight="bold", color="white")
+            ], alignment=ft.MainAxisAlignment.CENTER, horizontal_alignment=ft.CrossAxisAlignment.CENTER),
+            width=150, height=150, bgcolor=data["c"], border_radius=20,
+            on_click=lambda _: self.page.go(data["r"]), ink=True,
+            shadow=ft.BoxShadow(blur_radius=10, color="grey")
+        )
